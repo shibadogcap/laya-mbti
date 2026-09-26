@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.DS_Store
+*.local
+
+# Generated model assets (~934 MB) — exported in CI, never committed.
+public/models/
+
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+.uv/
+
+# Local tooling state
+.openchamber/
+
+# Editor
+.vscode/
+.idea/

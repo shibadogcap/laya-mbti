@@ -1,0 +1,12 @@
+# Generated model assets are large and must never be read or committed.
+public/models/**
+
+# Dependencies and build output
+node_modules/**
+dist/**
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key

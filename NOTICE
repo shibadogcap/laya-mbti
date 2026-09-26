@@ -1,0 +1,50 @@
+laya-mbti
+Copyright 2026 laya-mbti contributors
+
+This project runs the Laya decision model in the browser.
+
+Vendored source (Apache-2.0):
+- Laya, https://github.com/NandhaKishorM/laya
+  Copyright Convai Innovations and Laya contributors.
+  Files adapted into this repository under src/vendor/laya-ts/:
+    - agent.ts, common.ts, providers.ts, tokenizer.ts, hooks.ts, structured.ts
+    - scripts/export_laya_ts.py (from laya-ts/scripts/export_onnx.py)
+  Modifications:
+    - providers.ts is browser-only, bundles ONNX Runtime statically, uses a flat
+      Float32Array encoder→head handoff, and disables graph optimization on the
+      WebGPU encoder path to avoid an unsupported fused LayerNorm;
+    - providers.ts adds a WebGPU capability preflight for the fp16 encoder
+      (adapter + `shader-f16`) and exports the out-of-memory / WebGPU limit /
+      device-lost / model-output classifier the inference worker uses to shrink
+      its batch and to decide on the CPU fallback;
+    - providers.ts adds `ProviderPlan` (WebGPU-first, WASM-second), the pure
+      `decideWasmFallback` / `nextBackend` policy the worker uses to rebuild on
+      WASM and restart an analysis, `SessionProvider.dispose`, and
+      `assetIsCached` so a rebuild reuses Cache Storage instead of the network;
+    - agent.ts adds `predictBatch` (multi-state batching) and decodes through a
+      shared `_answerFor` helper;
+    - agent.ts adds `dispose()` and releases the provider's sessions when
+      `Agent.load` fails after they were created;
+    - agent.ts validates every head pass (`validateHeadOutput`) and every decoded
+      answer (`validateAnswer`) for row counts, expected lengths and finiteness,
+      raising a Japanese error instead of returning NaN probabilities;
+    - the exporter writes an fp16 encoder with an fp32 output and an fp32 head,
+      and emits a parity fixture.
+
+Upstream projects adapted by Laya:
+- laya-mlx, https://github.com/mizorewww/laya-mlx
+  Copyright 2026 laya-mlx contributors; Apache-2.0.
+- ModernBERT architecture, Hugging Face Transformers; Apache-2.0.
+
+Model weights:
+- convaiinnovations/laya (subfolder `multilingual`) on Hugging Face (Apache-2.0),
+  pinned at revision 55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851. Weights are
+  downloaded and exported at build time; no weights are committed to Git.
+
+Bundled JavaScript dependencies:
+- onnxruntime-web (MIT)
+- @zip.js/zip.js (BSD-3-Clause)
+- solid-js (MIT)
+
+This is an independent project and is not affiliated with X Corp., Convai
+Innovations, or the upstream Laya projects.

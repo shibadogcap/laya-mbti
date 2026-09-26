@@ -1,0 +1,13 @@
+{
+  "name": "Guard against committing model binaries",
+  "version": "1.0.0",
+  "description": "The exported Laya checkpoint is ~934 MB and must never be committed; it is generated in CI. Warn when model assets appear in the workspace.",
+  "when": {
+    "type": "fileCreated",
+    "patterns": ["public/models/**"]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A file was created under public/models/. These are generated model assets and must never be committed to git. Confirm that public/models/ is covered by .gitignore and do not stage any file under it."
+  }
+}

@@ -1,0 +1,60 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.21"
+          python-version: "3.12"
+          enable-cache: true
+      - name: Restore exported model
+        id: model
+        uses: actions/cache@v4
+        with:
+          path: public/models/laya
+          key: laya-model-v2-${{ runner.os }}-${{ hashFiles('scripts/export_laya_ts.py', 'pyproject.toml', 'uv.lock') }}
+      - name: Export pinned model
+        if: steps.model.outputs.cache-hit != 'true'
+        run: uv run --frozen python scripts/export_laya_ts.py --out-dir public/models/laya
+      - run: pnpm build:pages
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

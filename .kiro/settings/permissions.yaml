@@ -1,0 +1,66 @@
+# Template permission rules for laya-mbti.
+#
+# Kiro reads workspace permissions from a per-user path outside the repository
+# (`~/.kiro/workspace-roots/<hash>/permissions.yaml`), so this file is a
+# committed reference. Copy it there (or merge the rules) to apply it locally.
+#
+# Priority is deny > ask > allow; a deny anywhere wins.
+
+rules:
+  # Package manager: pnpm only.
+  - capability: shell
+    effect: allow
+    match:
+      - "pnpm *"
+      - "pnpm exec *"
+      - "node *"
+      - "uv run *"
+      - "git status*"
+      - "git diff*"
+      - "git log*"
+
+  - capability: shell
+    effect: deny
+    match:
+      - "npm *"
+      - "yarn *"
+      - "rm -rf *"
+      - "sudo *"
+      - "git push*"
+
+  # Source edits are fine; model binaries and secrets are not.
+  - capability: fs_write
+    effect: allow
+    match:
+      - "src/**"
+      - "scripts/**"
+      - ".kiro/**"
+      - "*.md"
+      - "package.json"
+      - "vite.config.ts"
+
+  - capability: fs_write
+    effect: deny
+    match:
+      - "public/models/**"
+      - "**/*.env"
+      - "**/.env"
+      - "**/*.pem"
+      - "**/*.key"
+      - "pnpm-lock.yaml"
+
+  - capability: fs_read
+    effect: deny
+    match:
+      - "**/.env"
+      - "**/.env.*"
+      - "**/*.pem"
+      - "**/*.key"
+
+  - capability: web_fetch
+    effect: allow
+
+  - capability: mcp
+    effect: allow
+    match:
+      - "fetch/*"

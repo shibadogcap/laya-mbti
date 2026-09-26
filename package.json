@@ -1,0 +1,38 @@
+{
+  "name": "laya-mbti",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Estimate MBTI tendencies from an X (Twitter) archive, fully client-side with Laya typed decisions",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "dev:lan": "vite --host 0.0.0.0",
+    "dev:https": "VITE_HTTPS=1 vite --host 0.0.0.0",
+    "build": "vite build",
+    "build:pages": "vite build && node scripts/validate-pages.mjs dist",
+    "preview": "vite preview --host 127.0.0.1",
+    "ogp": "node scripts/render-ogp.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "model:export": "uv run python scripts/export_laya_ts.py --out-dir public/models/laya"
+  },
+  "dependencies": {
+    "@fontsource-variable/noto-sans-jp": "^5.3.0",
+    "@zip.js/zip.js": "^2.18.2",
+    "onnxruntime-web": "1.30.0",
+    "solid-js": "^1.9.15"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-basic-ssl": "^2.3.0",
+    "agent-ui-annotation": "^0.8.0",
+    "typescript": "5.9.3",
+    "vite": "7.3.1",
+    "vite-plugin-solid": "^2.11.14",
+    "vitest": "^3.2.7"
+  }
+}

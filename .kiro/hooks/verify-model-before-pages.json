@@ -1,0 +1,12 @@
+{
+  "name": "Verify Pages bundle before deploy",
+  "version": "1.0.0",
+  "description": "Recompute model checksums and enforce the 1 GB GitHub Pages budget before a deploy build.",
+  "when": {
+    "type": "userTriggered"
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "pnpm build:pages"
+  }
+}

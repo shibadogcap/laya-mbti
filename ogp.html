@@ -1,0 +1,93 @@
+<!doctype html>
+<!--
+  Source for public/ogp.png, kept in the repo so the image can be regenerated
+  with `pnpm ogp`. It is a dev-only page: the build does not ship it, only the
+  PNG it produces. The webfont comes from node_modules, which is why the render
+  runs against the dev server rather than a static file server.
+-->
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/node_modules/@fontsource-variable/noto-sans-jp/index.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #f4f5f7;
+      }
+
+      .ogp {
+        display: flex;
+        width: 1200px;
+        height: 630px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 56px;
+        padding: 26px 64px 78px;
+        box-sizing: border-box;
+        background: linear-gradient(155deg, #f8f7ff 0%, #f4f5f7 60%);
+        font-family: "Noto Sans JP Variable", sans-serif;
+        color: #18212b;
+      }
+
+      .ogp__copy {
+        display: grid;
+        gap: 34px;
+        align-content: center;
+        flex: 1 1 auto;
+      }
+
+      .ogp__title {
+        margin: 0;
+        font-size: 68px;
+        font-weight: 850;
+        letter-spacing: -0.03em;
+        line-height: 1.18;
+      }
+
+      .ogp__title span {
+        color: #5549c7;
+      }
+
+      .ogp__bars {
+        display: grid;
+        gap: 16px;
+        width: 460px;
+      }
+
+      .ogp__bar {
+        height: 22px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #e6e9ee;
+      }
+
+      .ogp__bar span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+      }
+
+      .ogp__art {
+        width: 360px;
+        height: 360px;
+        flex: 0 0 auto;
+        object-fit: contain;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="ogp">
+      <div class="ogp__copy">
+        <h1 class="ogp__title">あなたの投稿を、<br /><span>4つの軸</span>で読み解く。</h1>
+        <div class="ogp__bars">
+          <div class="ogp__bar"><span style="width: 72%; background: #5b4eaa"></span></div>
+          <div class="ogp__bar"><span style="width: 88%; background: #397e65"></span></div>
+          <div class="ogp__bar"><span style="width: 61%; background: #a36b4c"></span></div>
+          <div class="ogp__bar"><span style="width: 84%; background: #8a6a1f"></span></div>
+        </div>
+      </div>
+      <img class="ogp__art" src="/hero-creator.png" alt="" />
+    </div>
+  </body>
+</html>

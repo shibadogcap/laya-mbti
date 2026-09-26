@@ -1,0 +1,13 @@
+{
+  "name": "Typecheck on source save",
+  "version": "1.0.0",
+  "description": "Run the TypeScript compiler whenever a source file is edited so type errors never reach CI.",
+  "when": {
+    "type": "fileEdited",
+    "patterns": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"]
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "pnpm typecheck"
+  }
+}
