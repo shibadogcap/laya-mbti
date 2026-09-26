@@ -131,6 +131,14 @@ const MEMORY_PATTERN =
  * limits, WGSL and dispatch validation. A big batch trips these; a single item
  * usually does not, so the worker halves its batch and retries.
  */
+/**
+ * A pass that never settles. A lost mobile GPU process often leaves the promise
+ * pending instead of rejecting, so without this the run would sit at one
+ * percentage forever with no fallback. A smaller batch clears it when the batch
+ * was the problem; otherwise the worker rebuilds on the CPU.
+ */
+const GPU_HANG_PATTERN = /応答がありません|応答なし|停止しました|timed out|timeout|hang/i;
+
 const WEBGPU_LIMIT_PATTERN =
   /device lost|device was lost|lost the device|context lost|adapter|out of bounds|out-of-bounds|exceed|too large|maximum|limit|validation|invalid|not supported|unsupported|buffer size|buffer is too|bind ?group|pipeline|compilation|shader|dispatch/i;
 
@@ -146,9 +154,22 @@ export function isMemoryError(error: unknown): boolean {
  */
 const MODEL_OUTPUT_PATTERN = /NaN|Infinity|有限|確率|出力|行|答え|集計|計算/i;
 
+/** The subset of the above that a smaller batch cannot fix. */
+const NUMERICAL_PATTERN = /NaN|Infinity|有限値|数値が不安定/i;
+
 /** True when the model output itself was unusable, whatever the execution provider. */
 export function isModelOutputError(error: unknown): boolean {
   return MODEL_OUTPUT_PATTERN.test(errorText(error));
+}
+
+/**
+ * True when the failure is a non-finite number rather than a short or oversized
+ * output. A phone GPU that overflows fp16 activations returns NaN at any batch
+ * size, so the worker must not spend three halving passes on it; a truncated
+ * head is a different message and still is worth retrying smaller.
+ */
+export function isNumericalError(error: unknown): boolean {
+  return NUMERICAL_PATTERN.test(errorText(error));
 }
 
 /**
@@ -158,8 +179,47 @@ export function isModelOutputError(error: unknown): boolean {
  */
 export function isBatchSizeError(error: unknown): boolean {
   const text = errorText(error);
-  return MEMORY_PATTERN.test(text) || WEBGPU_LIMIT_PATTERN.test(text);
+  return (
+    MEMORY_PATTERN.test(text) ||
+    WEBGPU_LIMIT_PATTERN.test(text) ||
+    GPU_HANG_PATTERN.test(text)
+  );
 }
+
+/**
+ * Next batch size for the analysis loop.
+ *
+ * The loop used to start at the plan maximum and only ever shrink, so a phone
+ * whose GPU cannot hold a full batch burned the whole run before failing and
+ * then restarted on the CPU. Starting narrow and growing while passes succeed
+ * finds the device's ceiling in a few cheap passes instead, which is what keeps
+ * a phone on the GPU at all.
+ *
+ * After a shrink the size never grows again: a device that failed at a given
+ * batch would oscillate between growing and shrinking. `useCpuInstead` reports
+ * that one tweet per pass is all this GPU manages, and a single-item WebGPU pass
+ * has more overhead than the CPU path, so the worker switches instead of
+ * crawling.
+ */
+export function planNextBatch(input: {
+  current: number;
+  max: number;
+  degraded: boolean;
+}): { next: number; useCpuInstead: boolean } {
+  const { current, max, degraded } = input;
+  if (degraded) {
+    return { next: Math.max(1, Math.floor(current / 2)), useCpuInstead: current <= 2 };
+  }
+  if (current >= max) return { next: max, useCpuInstead: false };
+  return { next: Math.min(max, current * 2), useCpuInstead: false };
+}
+
+/**
+ * Batch the first pass of a run uses. Narrow on purpose: see `planNextBatch`.
+ * Two is the smallest width that still amortises the per-pass upload, and it is
+ * below the limit of every GPU the project has been seen to run on.
+ */
+export const FIRST_PASS_STATES = 2;
 
 /**
  * WebGPU features the fp16 encoder needs. The exported encoder runs its weights and

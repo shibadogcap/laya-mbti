@@ -1,11 +1,12 @@
 /// <reference lib="webworker" />
-import { Agent, type QuestionDef } from "../vendor/laya-ts/agent.js";
+import { Agent, type QuestionDef, type SystemOneResult } from "../vendor/laya-ts/agent.js";
 import {
   assetIsCached,
   checkEncoderWebGpu,
   decideWasmFallback,
   errorText,
   isBatchSizeError,
+  isNumericalError,
   isModelOutputError,
   nextBackend,
   wasmPlan,
@@ -15,6 +16,7 @@ import {
   type ProviderPlan,
 } from "../vendor/laya-ts/providers.js";
 import { AXES, buildQuestions, randomizedQuestionPlan } from "../lib/mbti.js";
+import { isFiniteAnswer } from "../lib/finite.js";
 import type { WorkerResponse } from "../lib/inference.js";
 import type { AxisAnswer } from "../lib/types.js";
 
@@ -36,6 +38,46 @@ const MAX_ROWS = 64;
 
 /** Unbiased draw for the per-run question shuffle; `Math.random` is enough. */
 const cryptoRandom = (): number => Math.random();
+
+/**
+ * Wall-clock budget for a single pass. A phone GPU is far slower than a desktop
+ * one, so the budget scales with the batch, but it stays bounded: a pass that
+ * blows through it is treated as a hang rather than waited on forever.
+ */
+function passBudgetMs(itemCount: number): number {
+  return Math.min(300_000, 30_000 + 20_000 * Math.max(1, itemCount));
+}
+
+/**
+ * Rejects when the pass outlives its budget.
+ *
+ * When the GPU process dies mid-run, ORT can leave the promise pending instead
+ * of rejecting, so the loop would never reach the batch-halving or WASM
+ * fallback branches. The message is written to match the batch-size classifier
+ * so a hang is handled exactly like a device loss.
+ */
+function withPassTimeout<T>(work: Promise<T>, itemCount: number): Promise<T> {
+  const budget = passBudgetMs(itemCount);
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        new Error(
+          `GPU が${Math.round(budget / 1000)}秒応答がありませんでした（device lost / ハング）`,
+        ),
+      );
+    }, budget);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
 const MODEL_FILES = ["encoder.onnx", "head.onnx"] as const;
 /** A lost WebGPU device can leave ORT's `release()` waiting; do not stall on it. */
 const RELEASE_TIMEOUT_MS = 5000;
@@ -103,6 +145,45 @@ async function createAgent(plan: ProviderPlan, ctxInfo: LoadContext): Promise<Ag
   });
 }
 
+/**
+ * One short pass to prove the provider returns usable numbers.
+ *
+ * The encoder runs in fp16, and a phone GPU can overflow an activation to inf,
+ * which reaches the head as NaN. That shows up as a run that dies a few hundred
+ * posts in, after the wait for the model and a long GPU pass, so it is checked
+ * once up front instead: a device that cannot produce a finite answer is handed
+ * to the CPU before the user starts.
+ */
+const NUMERIC_PROBE_TEXT =
+  "この文章は数値検証用の短いサンプルです。 yakinpaku na kotoba de arimasu.";
+
+/** Returns the offending value's description, or null when the pass is usable. */
+async function findNonFiniteAnswer(plan: ProviderPlan, ctxInfo: LoadContext): Promise<string | null> {
+  const probe = await createAgent(plan, ctxInfo);
+  try {
+    const plan2 = randomizedQuestionPlan(() => 0.5);
+    const results = await withPassTimeout(
+      probe.predictBatch([NUMERIC_PROBE_TEXT], buildQuestions(plan2.order, plan2.flipOptions), {
+        batchSize: AXES.length,
+      }),
+      1,
+    );
+    return findNonFinite(results);
+  } finally {
+    await releaseAgent(probe);
+  }
+}
+
+function findNonFinite(results: SystemOneResult[]): string | null {
+  for (const result of results) {
+    for (const [id, answer] of Object.entries(result.answers)) {
+      const bad = isFiniteAnswer(answer);
+      if (bad) return `${id}: ${bad}`;
+    }
+  }
+  return null;
+}
+
 /** Reads the model, preferring WebGPU and falling back to WASM if that cannot run. */
 async function ensureAgent(ctxInfo: LoadContext): Promise<{ reason?: string }> {
   // The encoder is fp16, so the GPU has to expose shader-f16. Checked before
@@ -115,6 +196,15 @@ async function ensureAgent(ctxInfo: LoadContext): Promise<{ reason?: string }> {
   try {
     agent = await createAgent(first, ctxInfo);
     activePlan = first;
+    if (first.backend === "webgpu") {
+      const broken = await findNonFiniteAnswer(first, ctxInfo);
+      if (broken) {
+        throw new Error(
+          `この GPU は fp16 の計算が安定せず、検証用の1件で不正な値（${broken}）が出ました。` +
+            `WebGPU は使わず、CPU（WASM）で解析します。`,
+        );
+      }
+    }
   } catch (error) {
     const decision = decideWasmFallback({
       error,
@@ -227,10 +317,11 @@ async function analyze(
       const chunk = ordered.slice(done, done + statesPerChunk);
       let results;
       try {
-        results = await active.predictBatch(
-          chunk.map((tweet) => tweet.text),
-          questions,
-          { batchSize: statesPerChunk * qCount },
+        results = await withPassTimeout(
+          active.predictBatch(chunk.map((tweet) => tweet.text), questions, {
+            batchSize: statesPerChunk * qCount,
+          }),
+          chunk.length,
         );
       } catch (error) {
         if (cancelled || superseded()) {
@@ -239,7 +330,14 @@ async function analyze(
         }
         // Out of memory, WebGPU limit/validation failures and device loss all clear
         // on a smaller batch, so halve it and retry until a single tweet per pass.
-        if (statesPerChunk > 1 && (isBatchSizeError(error) || isModelOutputError(error))) {
+        // A non-finite result is excluded: a GPU whose fp16 arithmetic overflows
+        // returns NaN at every batch size, so retrying smaller only burns three
+        // passes before the CPU fallback that actually helps.
+        if (
+          statesPerChunk > 1 &&
+          (isBatchSizeError(error) || isModelOutputError(error)) &&
+          !isNumericalError(error)
+        ) {
           statesPerChunk = Math.max(1, Math.floor(statesPerChunk / 2));
           continue;
         }

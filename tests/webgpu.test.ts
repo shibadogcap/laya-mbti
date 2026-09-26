@@ -6,6 +6,7 @@ import {
   errorText,
   isBatchSizeError,
   isMemoryError,
+  isNumericalError,
 } from "../src/vendor/laya-ts/providers.js";
 
 const supports = (...features: string[]) => ({ has: (f: string) => features.includes(f) });
@@ -106,10 +107,21 @@ describe("batch-size error classification", () => {
       "Buffer is too large for the device",
       "Failed to request an adapter",
       "insufficient resources for the allocation",
+      // A lost GPU process can leave the pass pending instead of rejecting.
+      "GPU が70秒応答がありませんでした（device lost / ハング）",
+      "onnxruntime: pass timed out",
     ];
     for (const message of retryable) {
       expect(isBatchSizeError(new Error(message))).toBe(true);
     }
+  });
+
+  it("separates a non-finite result from a fixable batch problem", () => {
+    // A GPU whose fp16 arithmetic overflows returns NaN at any batch size, so the
+    // worker must not retry it smaller; a short head row is worth a retry.
+    expect(isNumericalError(new Error("モデルが質問「EI」（行 0）に NaN を返しました。"))).toBe(true);
+    expect(isNumericalError(new Error("確率に +Infinity が含まれています。"))).toBe(true);
+    expect(isNumericalError(new Error("必要な 4 行に対して logits 2 行です。"))).toBe(false);
   });
 
   it("leaves unrelated failures to the caller", () => {
