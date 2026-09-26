@@ -31,7 +31,7 @@ const BACKEND_NOTE: Record<EncoderBackend, string> = {
   webgpu: "",
   wasm:
     "WebGPU が使えない、または GPU で実行できなかったため、CPU で自動的にリトライしています。" +
-    "WebGPU で実行する場合よりかなり時間がかかるので、解析する最大件数を絞ると早く終わります。",
+    "WebGPU で実行する場合よりかなり時間がかかります。",
 };
 
 function modelBaseUrl(): string {
@@ -52,6 +52,13 @@ export const SITE_URL = "https://laya-mbti.shibadogcap.com";
 export const REPO_URL = "https://github.com/shibadogcap/laya-mbti";
 export const OWNER_GITHUB_URL = "https://github.com/shibadogcap";
 export const OWNER_X_URL = "https://x.com/4ba_ba_baba";
+
+/**
+ * Hashtag appended to the share text. Underscored on purpose: the repo and the
+ * domain keep the hyphen, but a hyphen inside a hashtag reads as a separator to
+ * the eye and the tag is easier to find as one token.
+ */
+export const SHARE_HASHTAG = "#laya_mbti";
 
 function ortBaseUrl(): string {
   return new URL("ort/", document.baseURI).href;
@@ -330,7 +337,12 @@ export default function App() {
     const active = backend();
     if (!active) return null;
     const reason = backendReason();
-    return [BACKEND_NOTE[active], reason].filter(Boolean).join(" ") || null;
+    // A concrete cap is more use than "please reduce it": on a phone the CPU path
+    // is the only one that finishes, and the reader can see whether the current
+    // selection is anywhere near plausible.
+    const count = selected().length;
+    const suggested = count > 40 ? `今回のように${count.toLocaleString()}件を選ぶと終まらないことがあります。解析する最大件数を 40 程度にしてください。` : "";
+    return [BACKEND_NOTE[active], suggested, reason].filter(Boolean).join(" ") || null;
   };
 
   const currentAnalysisProgress = () =>
@@ -346,7 +358,7 @@ export default function App() {
   function shareResult(value: MbtiResult): void {
     const text =
       `${value.usedTweets.toLocaleString()}件の投稿を分析したら、` +
-      `私のMBTIは ${value.type} でした！ #laya-mbti`;
+      `私のMBTIは ${value.type} でした！ ${SHARE_HASHTAG}`;
     const intent = new URL("https://x.com/intent/post");
     intent.searchParams.set("text", `${text}\n${SITE_URL}`);
     intent.searchParams.set("url", SITE_URL);

@@ -40,23 +40,35 @@ const MAX_ROWS = 64;
 const cryptoRandom = (): number => Math.random();
 
 /**
- * Wall-clock budget for a single pass. A phone GPU is far slower than a desktop
- * one, so the budget scales with the batch, but it stays bounded: a pass that
- * blows through it is treated as a hang rather than waited on forever.
+ * Wall-clock budget for a single WebGPU pass.
+ *
+ * A phone GPU is far slower than a desktop one and a pass carries up to
+ * `statesPerChunk` posts of up to 512 tokens, so the budget scales with the
+ * batch and is deliberately generous: a false positive here kills a healthy run,
+ * while a real deadlock is caught within minutes rather than never.
  */
 function passBudgetMs(itemCount: number): number {
-  return Math.min(300_000, 30_000 + 20_000 * Math.max(1, itemCount));
+  return Math.min(900_000, 60_000 + 45_000 * Math.max(1, itemCount));
 }
 
 /**
- * Rejects when the pass outlives its budget.
+ * Rejects when a **WebGPU** pass outlives its budget.
  *
  * When the GPU process dies mid-run, ORT can leave the promise pending instead
  * of rejecting, so the loop would never reach the batch-halving or WASM
  * fallback branches. The message is written to match the batch-size classifier
  * so a hang is handled exactly like a device loss.
+ *
+ * The CPU path is deliberately left alone: there is no device there to lose, and
+ * a single post can take minutes on a phone, so a deadline would only abort runs
+ * that are working.
  */
-function withPassTimeout<T>(work: Promise<T>, itemCount: number): Promise<T> {
+function withPassTimeout<T>(
+  work: Promise<T>,
+  itemCount: number,
+  backend: EncoderBackend,
+): Promise<T> {
+  if (backend !== "webgpu") return work;
   const budget = passBudgetMs(itemCount);
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -157,16 +169,26 @@ async function createAgent(plan: ProviderPlan, ctxInfo: LoadContext): Promise<Ag
 const NUMERIC_PROBE_TEXT =
   "この文章は数値検証用の短いサンプルです。 yakinpaku na kotoba de arimasu.";
 
+/**
+ * A near-maximum-length probe. fp16 overflow shows up in the long activations a
+ * full 512-token sequence produces, not in a one-line sample, so a probe that
+ * only used short text would pass on a GPU that dies two hundred posts in.
+ */
+const NUMERIC_PROBE_LONG_TEXT = NUMERIC_PROBE_TEXT.repeat(24);
+
 /** Returns the offending value's description, or null when the pass is usable. */
 async function findNonFiniteAnswer(plan: ProviderPlan, ctxInfo: LoadContext): Promise<string | null> {
   const probe = await createAgent(plan, ctxInfo);
   try {
     const plan2 = randomizedQuestionPlan(() => 0.5);
     const results = await withPassTimeout(
-      probe.predictBatch([NUMERIC_PROBE_TEXT], buildQuestions(plan2.order, plan2.flipOptions), {
-        batchSize: AXES.length,
-      }),
-      1,
+      probe.predictBatch(
+        [NUMERIC_PROBE_TEXT, NUMERIC_PROBE_LONG_TEXT],
+        buildQuestions(plan2.order, plan2.flipOptions),
+        { batchSize: AXES.length * 2 },
+      ),
+      2,
+      plan.backend,
     );
     return findNonFinite(results);
   } finally {
@@ -322,6 +344,7 @@ async function analyze(
             batchSize: statesPerChunk * qCount,
           }),
           chunk.length,
+          plan.backend,
         );
       } catch (error) {
         if (cancelled || superseded()) {
